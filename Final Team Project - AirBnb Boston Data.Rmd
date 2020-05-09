@@ -1,0 +1,501 @@
+---
+title: "Final Team Project - AirBnb Boston Data"
+output: html_notebook
+---
+
+
+## Step I: Data Preparation & Exploration
+
+# Read data into your local environment
+```{r}
+df <- read.csv("metad699_train.csv")
+View(df)
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+library(ggplot2)
+library(caret)
+library(plyr)
+library(forecast)
+boston <- filter(df, city=="Boston")
+```
+I. Missing Values
+```{r}
+"We first used the anyNA function to determine if we had any missing data. Upon filtering the data with our selected city of Boston, we were able to observe a significant number of blank cells and missing values. We decided to find and use the median values as replacements and replaced blank spaces with NA's. Overall, we ended up preserving our full filtered data with 3468 observations and 29 variables. Upon preserving all our data for numerical categories, we deleted unnecessary columns and further cleaned our data frame where no missing NA's were present in colSums. We re-named our finalized copy as 'boston1'."
+
+anyNA(boston)
+# Explore missing values
+View(boston)
+colSums(is.na(boston))
+# Explore median values for missing column without factoring NA's
+median(boston$review_scores_rating, na.rm = TRUE)
+median(boston$bathrooms, na.rm = TRUE)
+median(boston$bedrooms, na.rm = TRUE)
+median(boston$bathrooms, na.rm = TRUE)
+median(boston$bedrooms, na.rm = TRUE)
+median(boston$beds, na.rm=TRUE)
+# replace all NA's
+boston[boston== ""] <-NA
+# replace all NA's with median value
+boston$review_scores_rating[is.na(boston$review_scores_rating)] <- median(boston$review_scores_rating, na.rm = TRUE)
+boston$host_response_rate <- as.numeric(sub("%","",boston$host_response_rate))/100
+boston$host_response_rate[is.na(boston$host_response_rate)] <- median(boston$host_response_rate, na.rm=TRUE)
+boston$beds[is.na(boston$beds)] <- median(boston$beds, na.rm = T)
+boston$bathrooms[is.na(boston$bathrooms)] <- median(boston$bathrooms, na.rm=T)
+boston$bedrooms[is.na(boston$bedrooms)] <- median(boston$bedrooms, na.rm=T)
+colSums(is.na(boston))
+# delete unecessary information
+boston1 <- boston[-c(13, 11, 19, 26, 27)]
+View(boston1)
+colSums(is.na(boston1))
+```
+II. Summary Statistics
+```{r}
+"In our selected data frame, we wanted to observe the true nightly price from log_price to understand the true dollar format. Upon running the summary of boston1 we noticed the following observations for the selected variables:
+
+		Review score ratings: Out of 100 being the highest score for review ratings from 			customers, 20 was the lowest. The median was 96 and the mean was 94.05 which makes the distribution of review ratings negatively skewed. When we further observe the standard deviation of 7.327312, we can conclude that our review ratings are very close to the mean.
+
+		Log price/Nightly price: We know that log price and nightly price are practically the same. The max rental price for an Airbnb in Boston is $1,400 a night while the lowest is $17. The median price is $136 while the mean is $165.50 which means that 	median is low and mean is high. In contrast to log price form, the median is higher while the mean is lower. This means that the dollar form of our nightly price data is 	positively skewed while in log form, the price is negatively skewed. A possibility 	for why this happens is the normalization of data where the price in normal format can be far spread out. This makes sense if we were to observe the standard deviation for both prices. In log format, the standard deviation is close to 0 which 		means that all the data point are close to its mean while the nightly price has a standard deviation farther apart from mean.  
+"
+
+boston1$nightly_price <- exp(boston1$log_price) # nightly price converion from log
+# Selected summary of statistics
+summary(boston1$review_scores_rating)
+summary(boston1$log_price)
+summary(boston1$nightly_price)
+sd(boston1$review_scores_rating)
+sd(boston1$log_price)
+sd(boston1$nightly_price)
+```
+
+III. Visualization
+```{r}
+"For histogram and scatter plot we saw that our scores rating remained the same. Using the Histogram, we can see that the majority of our data is skewed to the right where the scores tend to be above 75%. Only few outliers exist where the review scores are less than 50%. The same can be confirmed with the Scatter Plot where the bulk  of the reviews are rated at above 80%. This indicates that the reviews for AirBnb rentals in Boston are positive
+
+We further expanded the exploration of our data by choosing neighborhood and log price as variables. If there is one thing that influences someone to book a room, house, or apartment, it is the price you pay to book your rental. In our bar plot and violin plot, we can observe the log price per neighborhood. In the given bar plot, we see that the Allston-Brighton carries the bulk of the rentals based on prices. This means that those who rent through AirBnb, would rent the most in that area with the given price range. The Violin Plot gives a better indication of where that range lies. Based on the distribution of prices for Allston-Brighton, the bulk for log price lies slightly above 3 and up to about 5. We can conclude that the area is a frequent Airbnb hotspot due to its lower prices.
+
+When we examine our boxplot, in reference to review scores ratings and cancellation policies, the flexible a rental is, the higher the review will be. We can see that as the box plot becomes larger as the cancellation policy becomes more strict.
+"
+
+
+ggplot(boston1, aes(x=review_scores_rating)) +
+  geom_histogram(color="darkblue", fill="lightblue") +
+  labs(title="Histogram of Review Scores Rating") +
+  theme_classic()
+
+ggplot(boston1, aes(x=review_scores_rating, y=number_of_reviews, color=review_scores_rating)) +
+  geom_point() +
+  labs(title="Scatter Plot of Review Scores Rating") +
+  theme_classic()
+
+ggplot(boston1, aes(x=neighbourhood, y=log_price, fill=neighbourhood)) +
+  geom_bar(stat = "identity") +
+  labs(title="Bar Plot of Price per neighborhood") +
+  theme(axis.text.x = element_text(angle=45, hjust=1))
+
+install.packages("Hmisc")
+Violin <- ggplot(boston1, aes(neighbourhood, y=log_price, fill=neighbourhood)) + 
+  geom_violin(trim=FALSE) + 
+  stat_summary(fun.data="mean_sdl", mult=1, geom="crossbar", width=0.04 ) +  
+  labs(title = "Price per neighborhood") + theme(axis.text.x = element_text(angle=45, hjust=1))
+Violin
+
+ggplot(boston1, aes(cancellation_policy, review_scores_rating)) + geom_boxplot(fill="plum") + 
+  labs(title="Distribution of Review Scores Rating across various Cancelation ")
+
+```
+
+## Step II: Prediction
+```{r}
+"We began by setting up a correlation table and looking at the variables that were  heavily correlated with each other. Due to the numerous amounts of variables that were provided in the boston1 dataframe, we knew that our best option was to select a multiple linear regression model to determine our prediction. We used the sapply function to vector all columns and create a matrix.  Based on the correlation table that was created without excluding any data, we saw that log_price and nightly_price were completely correlated with each other. We also noticed that beds, bedrooms, and accommodates were heavily correlated. Overall, we decided to remove id, nightly_price, beds, and bedrooms to prevent multicollinearity. The below heatmap, indicates that there is no issue of multicollinearity.
+
+We further expanded the selection of our variables by using the backward elimination method in our multiple linear regression model. We used the 60/40 method to slice our data and train our model before validating it. Upon running the backward elimination, we saw that our recommended variables were narrowed down to 14 with an intercept of 1.20057241. If we were to determine our log_price for any given coefficient such accommodates as displayed in our regression summary, our regression formula would be as follows,
+
+log_price = 1.200 + 0.0819 * accommodates
+
+Assume you want to accommodate for 3 people, the equation would be as follows,
+
+log_price = 1.200 + 0.0819 * 3
+log_price = 1.4457
+
+The r-squared for our model is 0.5994. This means that close to 60% of our selected variables points would fit on the regression line. Our RMSE is 0.4444 which measures the difference between predicted values and actual values. The closer the number is to 0, the better. 
+"
+
+# normalize all data points
+install.packages("reshape")
+library(reshape)
+bos <- boston1
+bos <- bos[-c(1, 23, 24 ,25)]
+must_convert <- sapply(bos, is.factor)
+m2 <- sapply(bos[, must_convert], unclass)
+bos <- cbind(bos[,!must_convert], m2)
+table <- cor(bos)
+melted_table <- melt(table)
+# using a heatmap for slected variables
+library(ggplot2)
+ggplot(data = melted_table, aes(X1, X2, fill = value))+
+  geom_tile(color = "white")+
+  scale_fill_gradient2(low = "yellow", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Correlation") +
+  theme_minimal()+ 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+                                   size = 12, hjust = 1)) + coord_fixed()
+
+468 * 0.60
+3468 * 0.40
+
+Training <- slice(bos, 1:2080)
+Validation <- slice(bos, 2081:3468)
+# using the backward elimination method to further finalize our variables
+boston_mlr <- lm(log_price~ ., data = Training)
+step_boston_mlr <- step(boston_mlr, direction = "backward")
+step_boston_mlr
+summary(step_boston_mlr)
+boston_mlr_pred <- predict(boston_mlr, Validation)
+accuracy(boston_mlr_pred, Validation$log_price)
+```
+
+## Step III: Classification
+```{r}
+"K-nearest neighbor is an algorithm which determines the nearest or similar cases based on measures selected for the new data case. In this instance we utilized numeric variables provided to us in the data set and created a rental property and created values for each of the numeric values we chose to be included within our rental property. The variables 	we chose are the following variables:
+	·   	Log_price
+	·   	Bedrooms
+	·   	Beds
+	·   	Bathrooms
+	·   	Accommodates
+	·   	Review scoring rating
+	·   	Longitude
+	·   	Latitude
+	These variables acted as predictors within our model to determine the k-nearest neighbors. Similarity in the model is defined as the distance metric between two data points (i.e. hamming, Euclidean). However, a difficulty of this model, is trying to determining the correct k-value for the model to predict. We chose 9 for our k-value and 	this is because it provided the best classification performance. To do this we examined the accuracy of the validation set of data by processing different k-values with an accuracy model. We chose 9 because as you can see from the results attached below, it has our highest accuracy rate (see screenshot below). By choosing 9, we are maximizing 	our data set and not choosing such a high k-value where it doesn’t completely ignore the information from the predictors."
+
+# Part I k-nearest neighbors 
+boston2020 <-boston1[, c(2, 6, 7, 17, 18, 22, 23, 24, 1, 3, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 20, 21)]
+# Step 2 Partitioned the boston1 data set to 60%/40%
+set.seed(220)
+rental1 <- sample_n(boston2020, 3468)
+bostontrain <-slice(boston2020, 1:2080)
+bostonvalid <-slice(boston2020, 2080:3468)
+str(bostontrain)
+# Min & Max of Predictor values
+names(bos)
+accommodates <- runif(1, min(bostontrain$accommodates), max(bostontrain$accommodates))
+bathrooms <- runif(1, min(bostontrain$bathrooms), max(bostontrain$bathrooms))
+bedrooms<- runif(1, min(bostontrain$bedrooms), max(bostontrain$bedrooms))
+beds<- runif(1, min(bostontrain$beds), max(bostontrain$beds))
+log_price <- runif(1, min(bostontrain$log_price), max(bostontrain$log_price))
+review_scores_rating <- runif(1, min(bostontrain$review_scores_rating), max(bostontrain$review_scores_rating))
+latitude <- runif(1, min(bostontrain$latitude), max(bostontrain$latitude))
+longitude <- runif(1, min(bostontrain$longitude), max(bostontrain$longitude))
+
+names(bostontrain)
+log_price
+accommodates
+bathrooms
+latitude
+longitude
+review_scores_rating
+bedrooms
+beds
+# Creating rental_fee dataframe  
+colnames(bostontrain)
+rental_fee <- data.frame(log_price=5.89,
+                         accommodates=11.0,
+                         bathrooms=1.5,
+                         latitude=42.26,
+                         longitude=-71.0,
+                         review_scores_rating=26.0,
+                         bedrooms=3.0,
+                         beds=11.0)
+
+train.norm <- bostontrain
+valid.norm <- bostonvalid
+rental.norm <- rental1
+
+install.packages('caret')
+library(caret)
+norm.values <- preProcess(bostontrain[, 2:8], method=c("center", "scale"))
+train.norm[, 2:8] <- predict(norm.values, bostontrain[, 2:8])
+valid.norm[, 2:8] <- predict(norm.values, bostonvalid[, 2:8])
+rental.norm[, 2:8] <- predict(norm.values, rental1[, 2:8]) 
+new.norm <- predict(norm.values, rental_fee)
+# Use Knn Function to find nearest neighbors 
+install.packages("FNN")
+library(FNN)
+nn <- knn(train = train.norm[, 2:8], test = new.norm[, 2:8],
+          cl=train.norm[, 15], k=9)
+nn
+row.names(bostontrain)[attr(nn, "nn.index")]
+# Accuracy
+accuracy.rental<- data.frame(k = seq(1, 10, 1), accuracy = rep(0, 10))
+for(i in 1:10) {
+  knn.pred <- knn(train.norm[, 2:8], valid.norm[, 2:8],
+                  cl = train.norm[, 10], k = i)
+  accuracy.rental[i, 2] <- confusionMatrix(knn.pred, valid.norm[, 10])$overall[1]
+}
+view(accuracy.rental)
+```
+
+Part II. Naive Bayes
+```{r}
+"After generating the bins for prices that would be categorized as ‘student budget’, ‘below average’, ‘above average’, and ‘pricey dig’, we started to look for variables that would influence the price and rating. It was determine that the	property_type, cancellation_policy, bed_type, and cleaning_fee  were among the 	influential variables that would influence the price and price rating. After slicing, training, and validating our data, the prop table gave us an indication of where our probabilities would lie if we selected the price rating/cancellation policy variable as a sample.
+
+	When we looked at the prediction outcome of our model, we created a fictional apartment that would fall under the ‘student budget’ category along with a real bed, flexible cancellation policy, and existing cleaning fee. The model did well in interpreting that we would fall in the student budget category. To further examine the model, a confusion matrix was created to the test the accuracy for both the training and validation sets. The accuracy table noted above shows that our model was 94.24% accurate. This means that in terms prediction our model performance was excellent. The training accuracy was slightly above 94% but still within range of performance for validation."
+
+library(e1071)
+# Part C
+boston2 <- boston1 # copy boston 1 df to preserve orginal data
+summary(boston2$log_price) # capture the range
+summary(boston2$nightly_price) # capture the nightly price and compare to log
+# create bins using the cut function to create 4 price categories
+boston2$log_price_rating <- cut(boston2$log_price,
+                         breaks=c(2.833, 4.382, 5.298, 7.244, Inf), 
+                         labels=c("Student Budget","Below Average","Above Average","Pricey Dig"))
+summary(boston2$log_price_rating)
+# Part D
+boston2$log_price <- factor(boston2$log_price)
+boston2$property_type <- factor(boston2$property_type)
+boston2$cancellation_policy <- factor(boston2$cancellation_policy)
+boston2$bed_type <- factor(boston2$bed_type)
+boston2$cleaning_fee <- factor(boston2$cleaning_fee)
+boston2$log_price_rating <- factor(boston2$log_price_rating)
+# create training and validation sets
+selected.var <- c(2, 8, 9, 10, 26)
+train.index <- sample(c(1:dim(boston2)[1]), dim(boston2)[1]*.60)
+boston2_train <- boston2[train.index, selected.var]
+boston2_val <- boston2[-train.index, selected.var]
+# run naive bayes
+boston2.nb <- naiveBayes(log_price_rating ~., data = boston2_train)
+boston2.nb
+# create a prop table
+prop.table(table(boston2_train$cancellation_policy, boston2_train$log_price_rating), margin = 2)
+pred.prob <- predict(boston2.nb, newdata = boston2_val, type = "raw")
+pred.class <- predict(boston2.nb, newdata = boston2_val)
+boston2_df <- data.frame(actual = boston2_val$log_price_rating, predicted = pred.class, pred.prob)
+# dummy predictor for apartment type rental with a real bed, above average rating, and flexible cancellation
+boston2_df[boston2_val$bed_type == "Real Bed" &
+             boston2_val$cancellation_policy == "flexible" & 
+             boston2_val$cleaning_fee == "TRUE" &
+             boston2_val$log_price_rating == "Student Budget",]
+# Assesing model
+library(caret)
+pred.class <- predict(boston2.nb, newdata = boston2_train)
+confusionMatrix(pred.class, boston2_train$log_price_rating)
+
+pred.class <- predict(boston2.nb, newdata = boston2_val)
+confusionMatrix(pred.class, boston2_val$log_price_rating)
+```
+
+Part III. Classification Tree
+```{r}
+"The process of building a Classification Tree that predicts the outcome of the cancelation policy of an AirBnb rental listing involved several steps. After importing and filtering the data into a Boston-only dataframe, we converted listings from the dataset where the cancelation policy was either super_strict_60 or super_strict_30 into just “strict”. Since the assignment was to predict the outcome cancelation policy into only one of three buckets (flexible, moderate, or strict) these other cancelation policies needed to be removed. Luckily there were very few observations within the Boston dataset that had the super_strict policy. The next step was to replace NULL values in the dataset with NA, and then impute median values to replace the NA values. This ensured that our calculations would function as intended, since the packages we were utilizing cannot handle NULL or NA values in their computations. Next, we renamed the row names as the ID field of the AIrBnb listing, and removed columns that we did not intend to use as a part of the classification tree. We chose the rows to remove by considering the value that they would off to the model, while also contemplating the computational strain that certain categorical variables would cause to our local machines. While the rpart() and rpartplot() packages can handle categorical variables, ones with many different values across the observations in the dataset are computationally cumbersome and the resulting number of splits in the tree can be unwieldy. We ultimately chose to include 12 input variables, most of which were numeric, and a few more manageable categorical values like “Bed_Type” where there were only a few possible values. After that, we confirmed the 12 remianing variables were formatted in the datatype we desired and then partitioned out data into training and testing datasets.
+
+Once the training data was ready, we utilized the rpart() package with a complexity parameter of 0 to build our initial tree. By setting the CP = 0, we were ensuring that rpart() would build a massive tree that would surely overfit the training data. While this may seem like a wasted step since we knew we would not utilize the resulting tree, by doing this we were able to run the printcp() function and find the ideal number of splits for our tree where we would minimize the cross-validation error (denoted as xerror in the console). We then plotted the CP = 0 tree to confirm our suspicions that the tree was in fact too large. After plotting the tree and finding the CP value that corresponded to the lowest xerror, we reran our rpart() function with the xerror minimizing CP value, which resulted in a new classification tree with an ideal number of splits. For our dataset, the CP value that corresponded to the lowest xerror was 0.00501. 
+"
+
+library(reshape2)
+library(caret)
+library(rpart)
+library(rpart.plot)
+
+head(df)
+set.seed(200)
+boston3 <- filter(df, city=="Boston")
+# Convert 'super_strict_60' & 'super_strict_30' to just 'strict'
+boston3 <- data.frame(lapply(boston3, function(x) {gsub("super_", "", x) }))
+boston3 <- data.frame(lapply(boston3, function(x) {gsub("_30", "", x) }))
+boston3 <- data.frame(lapply(boston3, function(x) {gsub("_60", "", x) }))
+# check for 'NA' values
+sum(is.na(boston3))
+colSums(is.na(boston3))
+# Convert null values to 'NA'
+boston3[boston3== ""] <-NA
+# Impute median values when 'NA' & convert host_response_rate to numeric
+boston3$review_scores_rating <- as.numeric(boston3$review_scores_rating)
+boston3$review_scores_rating[is.na(boston3$review_scores_rating)] <- median(boston3$review_scores_rating, na.rm = TRUE)
+boston3$host_response_rate <- as.numeric(sub("%","",boston3$host_response_rate))/100
+boston3$host_response_rate[is.na(boston3$host_response_rate)] <- median(boston3$host_response_rate, na.rm=TRUE)
+boston3$beds <- as.numeric(boston3$beds)
+boston3$beds[is.na(boston3$beds)] <- median(boston3$beds, na.rm = T)
+boston3$bathrooms <- as.numeric(boston3$bathrooms)
+boston3$bathrooms[is.na(boston3$bathrooms)] <- median(boston3$bathrooms, na.rm=T)
+boston3$bedrooms <-as.numeric(boston3$bedrooms)
+boston3$bedrooms[is.na(boston3$bedrooms)] <- median(boston3$bedrooms, na.rm=T)
+
+colSums(is.na(boston3))
+sum(is.na(boston3))
+# rename rows as id field
+rownames(boston3) <- boston3[,1]
+# remove fields we do not intent to use
+names(boston3)
+boston3 <- boston3[-c(1, 3, 5, 11, 12, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23, 26, 27)]
+# confirm numeric variables are in fact numeric, convert if not
+class(boston3$log_price)
+boston3$log_price <- as.numeric((boston3$log_price))
+class(boston3$room_type) #factor
+class(boston3$accommodates)
+boston3$accommodates <- as.numeric(boston3$accommodates)
+class(boston3$bathrooms)
+class(boston3$bed_type) #factor
+class(boston3$cancellation_policy) #factor
+class(boston3$cleaning_fee) #factor
+class(boston3$instant_bookable) #factor
+class(boston3$number_of_reviews)
+boston3$number_of_reviews <- as.numeric(boston3$number_of_reviews)
+class(boston3$review_scores_rating)
+class(boston3$bedrooms)
+class(boston3$beds)
+# Create data partition of dataset
+train.index <- createDataPartition(boston3$cancellation_policy,
+                                   p = 0.60,  #percentage split, enter desired portion for training data (60/40 split)
+                                   list = FALSE,  #tells it that we do not want it to come out as a list
+                                   times = 1)  
+
+bos3_train <- boston3[train.index ,]
+bos3_valid <- boston3[-train.index ,]
+
+names(bos3_train)
+names(bos3_valid)
+# CREATING CLASSIFICATION TREES WITH VARIOUS COMPLEXITY PARAMETERS
+options(scipen = 999)
+# rpart with cp = 0 --- creates unpruned very large tree
+tree_bos3_cp0 <- rpart(cancellation_policy ~ ., 
+                       data=bos3_train, 
+                       method = "class",
+                       xval = 5,
+                       cp = 0)
+printcp(tree_bos3_cp0)
+rpart.plot(tree_bos3_cp0,
+           main = "Classification Tree with CP = 0")
+# results before pruning
+cp0 <- printcp(tree_bos3_cp0)
+class(cp0)
+cp0 <- data.frame(cp0)
+which.min(cp0$xerror)
+plotcp(tree_bos3_cp0)
+
+tree_cp0_pred <- predict(tree_bos3_cp0, bos3_train, type = "class")
+confusionMatrix(tree_cp0_pred,bos3_train$cancellation_policy)
+
+tree_cp0_pred2 <- predict(tree_bos3_cp0, bos3_valid, type = "class")
+confusionMatrix(tree_cp0_pred2,bos3_valid$cancellation_policy)
+# rpart with xerror minimizing cp value 
+tree_bos3_cp_min_error <- rpart(cancellation_policy ~ ., 
+                                data=bos3_train, 
+                                method = "class",
+                                cp = 0.0050100) # complexity parameter that corresponds to the value where the xerror was minimized (4th record in the cp0 df, nsplit = 7)
+printcp(tree_bos3_cp_min_error)
+# results after pruning
+cp_min_error.pred <- predict(tree_bos3_cp_min_error, bos3_train, type = "class")
+confusionMatrix(cp_min_error.pred, bos3_train$cancellation_policy)
+
+cp_min_error_pred2 <- predict(tree_bos3_cp_min_error, bos3_valid, type = "class")
+confusionMatrix(cp_min_error_pred2, bos3_valid$cancellation_policy)
+# rpart.plot visualization of pruned tree
+rpart.plot(tree_bos3_cp_min_error,
+           main = "Classification Tree with CP = 0.0038076",
+           clip.right.labs = FALSE,
+           type = 2,
+           branch = .75,
+           yesno = 2,
+           under = FALSE,
+           cex.main = 2.5,
+           shadow.col = "gray",
+           branch.col = "turquoise",
+           branch.lwd = 3,
+           branch.lty = 3,
+           branch.type = 5,
+           gap = 0)
+```
+
+## Step IV: Clustering
+
+```{r}
+
+library(cluster)    # clustering algorithms
+library(gridExtra)
+library(cluster)    # clustering algorithms
+library(factoextra) # clustering algorithms & visualization
+
+Data <- boston1
+"Converted the categorical variable ‘cancellation_policy’ to numeric with a scale of 1 (flexible) to 5 (super_strict_60)."
+levels(Data$cancellation_policy)
+# Converting cancellation_policy to numeric
+Data$cancellation_policy<-revalue(Data$cancellation_policy,c("flexible"=1,"moderate"=2,"strict"=3,
+                                                             "super_strict_30"=4, "super_strict_60"=5))
+"Excluded the ‘Cambridge’ and ‘Somerville’ neighborhoods as there were only 5 properties in total."
+Data <- filter(Data, neighbourhood!= "Cambridge")
+Data <- filter(Data, neighbourhood!= "Somerville")
+# Adding nightly price per person
+Data <- Data%>%
+  mutate(price_per_person = nightly_price/accommodates)
+# Remove non-numeric columns
+colnames(Data)
+Data<-Data[,-c(1,3:5,8,10:19)]
+colnames(Data)
+Aggregate_Data<-aggregate(cbind(log_price,accommodates,bathrooms,cancellation_policy, number_of_reviews,review_scores_rating,bedrooms,beds,nightly_price,price_per_person)~neighbourhood,data=Data,mean)
+
+Boston<-data.frame(Aggregate_Data[,-1],row.names=Aggregate_Data$neighbourhood)
+Scaled_Data <- scale(Boston)
+
+# Optimal No. of Clusters
+# elbow method
+set.seed(123)
+fviz_nbclust(Scaled_Data, kmeans, method = "wss")
+# avg silhouette method
+fviz_nbclust(Scaled_Data, kmeans, method = "silhouette")
+# K-Means Algorithm
+set.seed(123)
+k4 <- kmeans(Scaled_Data, 4, nstart = 25)
+p1 <- fviz_cluster(k4, data = Scaled_Data)
+p1
+print(k4)
+
+k5 <- kmeans(Scaled_Data, 5, nstart = 25)
+p2 <- fviz_cluster(k5, data = Scaled_Data)
+p2
+print(k5)
+
+k6 <- kmeans(Scaled_Data, 6, nstart = 25)
+p3 <- fviz_cluster(k6, data = Scaled_Data)
+p3
+print(k6)
+
+k7 <- kmeans(Scaled_Data, 7, nstart = 25)
+p4 <- fviz_cluster(k7, data = Scaled_Data)
+p4
+print(k7)
+# comparing the clusters
+# grid.arrange(p1, p2, p3, p4, nrow = 2)
+
+# Adding to our initial data to do some descriptive statistics at the cluster level
+k4$centers
+
+Boston %>%
+  mutate(Cluster = k4$cluster) %>%
+  group_by(Cluster) %>%
+  summarise_all("mean")
+
+# Hierarchical Clustering 
+# Dissimilarity matrix
+Distance <- dist(Scaled_Data, method = "euclidean")
+# Hierarchical clustering using Complete Linkage
+hc <- hclust(Distance, method = "complete" )
+# Plot the obtained dendrogram
+plot(hc, cex = 0.6, hang = -1)
+rect.hclust(hc, k = 4, border = 2:5)
+```
+
+## Step V: Conclusions
+```{r}
+"The overall process was very collaborative in nature. As a team we had decided to prepare and explore the data together and then work on our individual areas to come up with our analysis. In the process of doing so we had discussed and commented constructively on each other's work which resulted in a much better quality output in the end. The exploratory analysis of the AirBnb data helped us understand the rental landscape of Boston through various statistics and visualizations. For e.g. the clustering analysis shows how certain neighborhoods are similar in nature and also what are the various characteristics that make them a part of each cluster. This helps individuals and businesses alike to answer certain questions like which neighborhoods have the highest review scores, listing price etc. 
+
+The classification tree model could be useful for a property owner who is interested in listing their property for rental on AirBnb. If they were not sure what type of cancelation policy they should implement for their new rental, AirBnb could provide a service that helped them with “Based on the characteristics that you have provided regarding your potential listing, and other properties that share some of these characteristics, we recommend a cancelation policy of “x”.” If you operate under the presumption that the existing properties from which the model was built have their cancellation policies for good reason, this will help the new owner arrive at a good decision from the get-go. The property owner, AirBnb, and even potentially the ultimate customer/renter can all benefit from implementation of a Classification Tree such as the one we constructed. 
+
+When we examine the Naive Bayes model, we know that the model with its selected variables is pretty accurate. Upon setting up the categorical bins derived from the log price variable, we can see that the majority of AirBnb rentals were conducted in the below average price category. This plays an important role in realizing how much visitors are willing to pay to stay in Boston. With the mean and median log price falling at 4.913/4.884 we can see that the majority would rather pay less than the median/mean log price. In its true dollar format, this comes out to be around $80 a night but less than $136 dollars. 
+
+An important question to consider is who are these visitors? By using Naive Bayes alone it is difficult to determine who these visitors are. However, when you combine our Naive Bayes model along with other models such as the K-Means Analysis, you will be able to see which neighborhoods the ‘below average price category’ would be placed in and depict a clearer picture of who the audience are and their needs. Boston is known for being a college town with most colleges centered at or around the city. If there is anyone who is willing to pay a below average price rating, it would most likely be college students which can be seen as the majority of would fall at or below average price category. But you also have another half that is unknown and that half for certain falls in above average category.
+
+We can therefore conclude that the Airbnb data does give an insight as to who is visiting Boston and what is the price that they are willing to pay to stay. By using variables such as the price, cancellation policy, cleaning fee, neighborhoods, etc., we can derive further in depth questions as to the demographics of renting in Boston.
+"
+```
